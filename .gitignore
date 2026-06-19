@@ -6,3 +6,6 @@ protocolo.dat
 anexos/
 __pycache__/
 *.pyc
+
+# Documentacao confidencial (contem credenciais) - nunca enviar ao GitHub
+*.docx

@@ -33,7 +33,19 @@ do `servidor.py` — não há arquivos `.html` ou `.png` soltos.
 
 ---
 
-## ✉️ Envio de e-mail (SMTP) — Gmail · ✅ CONFIGURADO E FUNCIONANDO
+## 🌐 PRODUÇÃO (no ar) — link público
+O canal está hospedado no **Render**: **https://canal-denuncias-midrah.onrender.com**
+(deploy automático a partir do repositório GitHub a cada atualização).
+
+Na nuvem, o envio do e-mail é feito por **Google Apps Script (HTTPS)**, e não por
+SMTP — porque o Render (plano grátis) bloqueia conexões SMTP. O Apps Script
+(publicado na conta `tecnologiamidrah@gmail.com`) recebe os dados e envia o e-mail
+pelo Gmail. No Render isso é ativado pela variável de ambiente **`GAS_URL`** (a URL
+`/exec` do app da Web). O código do script está em `AppsScript-Codigo.gs`.
+
+---
+
+## ✉️ Envio de e-mail (SMTP) — Gmail · uso LOCAL
 
 O `servidor.py` está configurado e o envio foi **testado com sucesso**:
 
