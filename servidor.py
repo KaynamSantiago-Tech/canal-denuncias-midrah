@@ -262,7 +262,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <div class="filebox" id="filebox">
         <div class="ic">📎</div>
         <div>Clique para anexar arquivos</div>
-        <small>Imagens, PDF, documentos, áudios · até 10 MB no total</small>
+        <small>Imagens, PDF, documentos, áudios · até 25 MB no total</small>
       </div>
       <input type="file" id="fileinput" multiple style="display:none" />
       <div id="filelist"></div>
@@ -307,7 +307,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
 <script>
 const ENDPOINT = "/enviar";
-const MAX_TOTAL_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 25 * 1024 * 1024;
 const form = document.getElementById('form');
 const mAnon = document.getElementById('m-anon');
 const mId = document.getElementById('m-id');
@@ -341,7 +341,7 @@ function renderFiles(){
     div.appendChild(b); filelist.appendChild(div);
   });
   if(total > MAX_TOTAL_BYTES){
-    filelist.innerHTML += '<div style="color:var(--danger);font-size:12.5px;margin-top:6px">⚠️ Os anexos excedem 10 MB. Remova algum arquivo.</div>';
+    filelist.innerHTML += '<div style="color:var(--danger);font-size:12.5px;margin-top:6px">⚠️ Os anexos excedem 25 MB. Remova algum arquivo.</div>';
   }
 }
 function fileToB64(file){
@@ -660,7 +660,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, b'{"erro":"nao encontrado"}')
         try:
             length = int(self.headers.get("Content-Length", 0))
-            if length > 20 * 1024 * 1024:
+            if length > 40 * 1024 * 1024:   # ~25 MB de anexos viram ~33 MB em base64
                 return self._send(413, b'{"erro":"payload muito grande"}')
             d = json.loads(self.rfile.read(length).decode("utf-8"))
             for campo_obr in ("tipo", "data_ocorrencia", "pessoas", "descricao"):
