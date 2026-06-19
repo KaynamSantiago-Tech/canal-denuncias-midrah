@@ -483,7 +483,9 @@ def _conteudo_email(d, protocolo, registrado_em, anexos):
 
     if anexos:
         itens = "".join(f'<div style="padding:7px 11px;background:#f1f5fa;border:1px solid #e2e8f0;border-radius:8px;margin-top:6px;font-size:13.5px;color:#1f2a37">&#128206; {esc(limpar_nome(a["nome"], a.get("tipo")))} <span style="color:#64748b">({a["bytes_len"]//1024} KB)</span></div>' for a in anexos)
-        anexos_html = f'<div style="font-size:13.5px;color:#1f2a37;margin-bottom:6px">{len(anexos)} arquivo(s) anexado(s) a este e-mail:</div>{itens}'
+        anexos_html = (f'<div style="font-size:13.5px;color:#1f2a37;margin-bottom:6px">'
+                       f'{len(anexos)} arquivo(s) anexado(s) a este e-mail '
+                       f'<span style="color:#64748b">(para abrir/baixar, use a área de anexos do e-mail — ícone de clipe 📎, no topo da mensagem):</span></div>{itens}')
     else:
         anexos_html = '<div style="padding:11px 14px;border:1px dashed #cdd6e2;border-radius:10px;background:#fafcfe;color:#64748b;font-size:14px">Nenhum anexo enviado.</div>'
 
