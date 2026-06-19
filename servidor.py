@@ -576,6 +576,36 @@ def processar(d):
         return protocolo
 
 
+def diagnosticar(enviar_teste=False):
+    """Verificação remota: confere config + testa conexão/login SMTP do ambiente."""
+    import socket
+    info = {
+        "smtp_host": SMTP_HOST, "smtp_port": SMTP_PORT, "smtp_user": SMTP_USER,
+        "smtp_pass_definida": bool(SMTP_PASS), "smtp_pass_len": len(SMTP_PASS or ""),
+        "remetente": EMAIL_REMETENTE, "destino": EMAIL_DESTINO,
+    }
+    try:
+        sock = socket.create_connection((SMTP_HOST, SMTP_PORT), timeout=12)
+        sock.close(); info["tcp"] = "OK (porta liberada)"
+    except Exception as e:
+        info["tcp"] = f"FALHOU: {type(e).__name__}: {e}"
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as srv:
+            srv.starttls(context=ssl.create_default_context())
+            srv.login(SMTP_USER, SMTP_PASS)
+            info["login"] = "OK"
+            if enviar_teste:
+                m = EmailMessage()
+                m["Subject"] = "[TESTE-DIAG] Canal de Denúncias na nuvem"
+                m["From"] = EMAIL_REMETENTE; m["To"] = EMAIL_DESTINO
+                m.set_content("Teste de envio a partir do Render. Se chegou, o envio na nuvem funciona.")
+                srv.send_message(m)
+                info["envio_teste"] = "ENVIADO"
+    except Exception as e:
+        info["login"] = f"FALHOU: {type(e).__name__}: {e}"
+    return info
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -594,6 +624,13 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             page = HTML_PAGE.replace("midrah-logo.png", LOGO_DATA_URI)
             return self._send(200, page, "text/html; charset=utf-8")
+        if path == "/diag":
+            from urllib.parse import urlparse, parse_qs
+            q = parse_qs(urlparse(self.path).query)
+            if q.get("k", [""])[0] != "midrah-diag-7k2p":
+                return self._send(403, b'{"erro":"forbidden"}')
+            enviar = q.get("send", [""])[0] == "1"
+            return self._send(200, json.dumps(diagnosticar(enviar), ensure_ascii=False).encode())
         self._send(404, b'{"erro":"nao encontrado"}')
 
     def do_POST(self):
