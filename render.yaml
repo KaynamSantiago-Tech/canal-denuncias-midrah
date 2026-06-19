@@ -1,0 +1,24 @@
+# Blueprint de deploy do Render — Canal de Denúncias Midrah
+# Ao conectar o repositório no Render, ele lê este arquivo automaticamente.
+services:
+  - type: web
+    name: canal-denuncias-midrah
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python servidor.py
+    envVars:
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        value: tecnologiamidrah@gmail.com
+      - key: EMAIL_DESTINO
+        value: denuncias.midrah@midrah.com.br
+      - key: EMAIL_REMETENTE
+        value: Canal de Denúncias Midrah <tecnologiamidrah@gmail.com>
+      # A senha de app NÃO fica no repositório. O Render vai pedir o valor
+      # no momento do deploy (sync:false = segredo informado no painel).
+      - key: SMTP_PASS
+        sync: false

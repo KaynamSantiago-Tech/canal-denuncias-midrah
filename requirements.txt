@@ -1,0 +1,3 @@
+# Canal de Denúncias — não há dependências externas.
+# Todo o sistema usa apenas a biblioteca padrão do Python.
+# (arquivo presente para o Render detectar a aplicação Python)

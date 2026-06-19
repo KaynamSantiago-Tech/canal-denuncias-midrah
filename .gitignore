@@ -1,0 +1,8 @@
+# Segredos e dados locais — NÃO enviar para o GitHub
+iniciar-servidor.bat
+.env
+emails_pendentes/
+protocolo.dat
+anexos/
+__pycache__/
+*.pyc
