@@ -615,51 +615,6 @@ def processar(d):
         return protocolo
 
 
-def diagnosticar(enviar_teste=False):
-    """Verificação remota: confere configuração e testa o método de envio ativo."""
-    info = {
-        "metodo_ativo": "Apps Script (HTTPS)" if GAS_URL else "SMTP",
-        "gas_url_definida": bool(GAS_URL),
-        "gas_token_definido": bool(GAS_TOKEN),
-        "destino": EMAIL_DESTINO, "remetente": EMAIL_REMETENTE,
-    }
-    if GAS_URL:
-        d_teste = {"modo": "Anônima", "tipo": "Teste de diagnóstico",
-                   "data_ocorrencia": datetime.date.today().isoformat(),
-                   "local": "(diagnóstico)", "pessoas": "(diagnóstico)",
-                   "descricao": "Teste automático de envio pela nuvem (Apps Script). Pode ignorar."}
-        try:
-            if enviar_teste:
-                enviar_via_gas(d_teste, "DIAG-TESTE",
-                               datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S"), [])
-                info["envio_teste"] = "ENVIADO via Apps Script"
-            else:
-                # só confere se a URL responde (sem mandar e-mail)
-                req = urllib.request.Request(GAS_URL, method="GET")
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    info["gas_get"] = "OK (%s)" % r.status
-        except Exception as e:
-            info["gas"] = f"FALHOU: {type(e).__name__}: {str(e)[:200]}"
-        return info
-    # diagnóstico SMTP (uso local)
-    import socket
-    info.update({"smtp_host": SMTP_HOST, "smtp_port": SMTP_PORT, "smtp_user": SMTP_USER,
-                 "smtp_pass_definida": bool(SMTP_PASS)})
-    try:
-        sock = socket.create_connection((SMTP_HOST, SMTP_PORT), timeout=12)
-        sock.close(); info["tcp"] = "OK"
-    except Exception as e:
-        info["tcp"] = f"FALHOU: {type(e).__name__}: {e}"
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as srv:
-            srv.starttls(context=ssl.create_default_context())
-            srv.login(SMTP_USER, SMTP_PASS)
-            info["login"] = "OK"
-    except Exception as e:
-        info["login"] = f"FALHOU: {type(e).__name__}: {e}"
-    return info
-
-
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -678,13 +633,6 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             page = HTML_PAGE.replace("midrah-logo.png", LOGO_DATA_URI)
             return self._send(200, page, "text/html; charset=utf-8")
-        if path == "/diag":
-            from urllib.parse import urlparse, parse_qs
-            q = parse_qs(urlparse(self.path).query)
-            if q.get("k", [""])[0] != "midrah-diag-7k2p":
-                return self._send(403, b'{"erro":"forbidden"}')
-            enviar = q.get("send", [""])[0] == "1"
-            return self._send(200, json.dumps(diagnosticar(enviar), ensure_ascii=False).encode())
         self._send(404, b'{"erro":"nao encontrado"}')
 
     def do_POST(self):
