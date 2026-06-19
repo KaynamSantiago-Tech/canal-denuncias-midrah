@@ -18,7 +18,7 @@ Depois abra no navegador:  http://localhost:8000
 ================================================================
 """
 
-import os, json, ssl, smtplib, base64, threading, mimetypes, datetime
+import os, json, ssl, smtplib, base64, threading, mimetypes, datetime, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from email.message import EmailMessage
 from email.utils import make_msgid
@@ -41,6 +41,12 @@ SMTP_USER = os.environ.get("SMTP_USER", "tecnologiamidrah@gmail.com")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")   # <-- definida por variável de ambiente (não no código)
 EMAIL_REMETENTE = os.environ.get("EMAIL_REMETENTE",
                                  "Canal de Denúncias Midrah <tecnologiamidrah@gmail.com>")
+
+# --- Envio por Google Apps Script (HTTPS — usado na nuvem, onde o SMTP é bloqueado) ---
+# Se GAS_URL estiver definida, o envio é feito por aqui (via HTTPS), pelo seu Gmail.
+# Defina GAS_URL no Render (Environment). O token confere com o script publicado.
+GAS_URL = os.environ.get("GAS_URL", "")
+GAS_TOKEN = os.environ.get("GAS_TOKEN", "midrah-canal-2026")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PEND_DIR = os.path.join(BASE_DIR, "emails_pendentes")
@@ -429,15 +435,10 @@ def data_br(iso):
         return iso or "—"
 
 
-# ---------- E-mail que REPLICA o formato do formulário ----------
-def montar_email(d, protocolo, registrado_em, anexos):
-    msg = EmailMessage()
-    msg["Subject"] = f"[Canal de Denúncias] {protocolo} — {d.get('tipo','—')}"
-    msg["From"] = EMAIL_REMETENTE
-    msg["To"] = EMAIL_DESTINO
-
+# ---------- Conteúdo do e-mail que REPLICA o formato do formulário ----------
+def _conteudo_email(d, protocolo, registrado_em, anexos):
+    """Retorna (subject, html, texto). A logo é referenciada como cid:logo."""
     anonima = d.get("modo") == "Anônima"
-    logo_cid = make_msgid(domain="midrah.com.br")[1:-1]
 
     def campo(rotulo, valor, opcional=False, area=False):
         tag_opt = ' <span style="color:#64748b;font-weight:500;font-size:12px">(opcional)</span>' if opcional else ''
@@ -475,7 +476,7 @@ def montar_email(d, protocolo, registrado_em, anexos):
  <tr><td>
   <table cellpadding="0" cellspacing="0" style="width:100%;border-radius:14px;overflow:hidden;box-shadow:0 10px 30px rgba(20,35,61,.1)">
    <tr><td style="background:linear-gradient(135deg,#14233D 0%,#0E1B30 45%,#1577B0 130%);padding:30px 32px">
-     <img src="cid:{logo_cid}" alt="Midrah" height="28" style="display:block;margin-bottom:16px;filter:brightness(0) invert(1)">
+     <img src="cid:logo" alt="Midrah" height="28" style="display:block;margin-bottom:16px;filter:brightness(0) invert(1)">
      <div style="color:#fff;font-size:24px;font-weight:700">Canal de Denúncias</div>
      <div style="color:#d6e4f2;font-size:14px;margin-top:6px">Denúncia registrada · Em conformidade com a Lei nº 14.457/2022</div>
    </td></tr>
@@ -507,7 +508,7 @@ def montar_email(d, protocolo, registrado_em, anexos):
  </td></tr>
 </table></body></html>"""
 
-    msg.set_content(
+    texto = (
         f"Canal de Denúncias — Protocolo {protocolo} ({registrado_em})\n"
         f"Modo: {d.get('modo','—')}\n\n"
         f"SOBRE A OCORRÊNCIA\n"
@@ -520,15 +521,24 @@ def montar_email(d, protocolo, registrado_em, anexos):
         f"Nome: {d.get('nome') or '—'}\nE-mail: {d.get('email') or '—'}\n"
         f"Telefone: {d.get('telefone') or '—'}\nCargo/Setor: {d.get('cargo') or '—'}\n"
     )
-    msg.add_alternative(html, subtype="html")
+    subject = f"[Canal de Denúncias] {protocolo} — {d.get('tipo','—')}"
+    return subject, html, texto
 
-    # logo inline (a partir do base64 embutido)
+
+# ---------- Envio 1: SMTP (uso local) ----------
+def montar_email(d, protocolo, registrado_em, anexos):
+    subject, html, texto = _conteudo_email(d, protocolo, registrado_em, anexos)
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_REMETENTE
+    msg["To"] = EMAIL_DESTINO
+    msg.set_content(texto)
+    msg.add_alternative(html, subtype="html")
     try:
         logo_bytes = base64.b64decode(LOGO_B64)
-        msg.get_payload()[1].add_related(logo_bytes, maintype="image", subtype="png", cid=f"<{logo_cid}>")
+        msg.get_payload()[1].add_related(logo_bytes, maintype="image", subtype="png", cid="<logo>")
     except Exception:
         pass
-
     for a in anexos:
         ctype = a.get("tipo") or mimetypes.guess_type(a["nome"])[0] or "application/octet-stream"
         maintype, _, subtype = ctype.partition("/")
@@ -537,19 +547,41 @@ def montar_email(d, protocolo, registrado_em, anexos):
     return msg
 
 
-def enviar_email(msg, protocolo):
-    if SMTP_HOST and SMTP_USER and SMTP_PASS:
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
-            s.starttls(context=ctx)
-            s.login(SMTP_USER, SMTP_PASS)
-            s.send_message(msg)
-        print(f"   [OK] E-mail enviado para {EMAIL_DESTINO}")
-        return
-    os.makedirs(PEND_DIR, exist_ok=True)
-    with open(os.path.join(PEND_DIR, f"{protocolo}.eml"), "wb") as f:
-        f.write(bytes(msg))
-    print(f"   [!] SMTP não configurado — e-mail salvo em emails_pendentes/{protocolo}.eml")
+def enviar_via_smtp(msg):
+    ctx = ssl.create_default_context()
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
+        s.starttls(context=ctx)
+        s.login(SMTP_USER, SMTP_PASS)
+        s.send_message(msg)
+    print(f"   [OK] E-mail enviado (SMTP) para {EMAIL_DESTINO}")
+
+
+# ---------- Envio 2: Google Apps Script via HTTPS (nuvem) ----------
+def enviar_via_gas(d, protocolo, registrado_em, anexos):
+    subject, html, texto = _conteudo_email(d, protocolo, registrado_em, anexos)
+    payload = {
+        "token": GAS_TOKEN,
+        "to": EMAIL_DESTINO,
+        "fromName": "Canal de Denúncias Midrah",
+        "subject": subject,
+        "html": html,
+        "text": texto,
+        "logo_b64": LOGO_B64,
+        "attachments": [
+            {"name": a["nome"], "mime": a.get("tipo") or "application/octet-stream",
+             "b64": base64.b64encode(a["bytes"]).decode()}
+            for a in anexos
+        ],
+    }
+    req = urllib.request.Request(
+        GAS_URL, data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        resp = r.read().decode(errors="ignore")
+    if '"ok"' in resp:
+        print(f"   [OK] E-mail enviado (Apps Script) para {EMAIL_DESTINO}")
+    else:
+        raise RuntimeError(f"Apps Script respondeu: {resp[:200]}")
 
 
 def processar(d):
@@ -564,29 +596,58 @@ def processar(d):
                 continue
             anexos.append({"nome": a.get("nome", "anexo"), "tipo": a.get("tipo", ""),
                            "bytes": raw, "bytes_len": len(raw)})
-        msg = montar_email(d, protocolo, registrado_em, anexos)
         try:
-            enviar_email(msg, protocolo)
+            if GAS_URL:
+                enviar_via_gas(d, protocolo, registrado_em, anexos)
+            elif SMTP_HOST and SMTP_USER and SMTP_PASS:
+                enviar_via_smtp(montar_email(d, protocolo, registrado_em, anexos))
+            else:
+                raise RuntimeError("Nenhum método de envio configurado (GAS_URL ou SMTP).")
         except Exception as e:
-            os.makedirs(PEND_DIR, exist_ok=True)
-            with open(os.path.join(PEND_DIR, f"{protocolo}.eml"), "wb") as f:
-                f.write(bytes(msg))
+            try:
+                os.makedirs(PEND_DIR, exist_ok=True)
+                with open(os.path.join(PEND_DIR, f"{protocolo}.eml"), "wb") as f:
+                    f.write(bytes(montar_email(d, protocolo, registrado_em, anexos)))
+            except Exception:
+                pass
             print(f"   [ERRO] Falha no envio ({e}); e-mail salvo em emails_pendentes/{protocolo}.eml")
         print(f"   Protocolo {protocolo} registrado.")
         return protocolo
 
 
 def diagnosticar(enviar_teste=False):
-    """Verificação remota: confere config + testa conexão/login SMTP do ambiente."""
-    import socket
+    """Verificação remota: confere configuração e testa o método de envio ativo."""
     info = {
-        "smtp_host": SMTP_HOST, "smtp_port": SMTP_PORT, "smtp_user": SMTP_USER,
-        "smtp_pass_definida": bool(SMTP_PASS), "smtp_pass_len": len(SMTP_PASS or ""),
-        "remetente": EMAIL_REMETENTE, "destino": EMAIL_DESTINO,
+        "metodo_ativo": "Apps Script (HTTPS)" if GAS_URL else "SMTP",
+        "gas_url_definida": bool(GAS_URL),
+        "gas_token_definido": bool(GAS_TOKEN),
+        "destino": EMAIL_DESTINO, "remetente": EMAIL_REMETENTE,
     }
+    if GAS_URL:
+        d_teste = {"modo": "Anônima", "tipo": "Teste de diagnóstico",
+                   "data_ocorrencia": datetime.date.today().isoformat(),
+                   "local": "(diagnóstico)", "pessoas": "(diagnóstico)",
+                   "descricao": "Teste automático de envio pela nuvem (Apps Script). Pode ignorar."}
+        try:
+            if enviar_teste:
+                enviar_via_gas(d_teste, "DIAG-TESTE",
+                               datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S"), [])
+                info["envio_teste"] = "ENVIADO via Apps Script"
+            else:
+                # só confere se a URL responde (sem mandar e-mail)
+                req = urllib.request.Request(GAS_URL, method="GET")
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    info["gas_get"] = "OK (%s)" % r.status
+        except Exception as e:
+            info["gas"] = f"FALHOU: {type(e).__name__}: {str(e)[:200]}"
+        return info
+    # diagnóstico SMTP (uso local)
+    import socket
+    info.update({"smtp_host": SMTP_HOST, "smtp_port": SMTP_PORT, "smtp_user": SMTP_USER,
+                 "smtp_pass_definida": bool(SMTP_PASS)})
     try:
         sock = socket.create_connection((SMTP_HOST, SMTP_PORT), timeout=12)
-        sock.close(); info["tcp"] = "OK (porta liberada)"
+        sock.close(); info["tcp"] = "OK"
     except Exception as e:
         info["tcp"] = f"FALHOU: {type(e).__name__}: {e}"
     try:
@@ -594,13 +655,6 @@ def diagnosticar(enviar_teste=False):
             srv.starttls(context=ssl.create_default_context())
             srv.login(SMTP_USER, SMTP_PASS)
             info["login"] = "OK"
-            if enviar_teste:
-                m = EmailMessage()
-                m["Subject"] = "[TESTE-DIAG] Canal de Denúncias na nuvem"
-                m["From"] = EMAIL_REMETENTE; m["To"] = EMAIL_DESTINO
-                m.set_content("Teste de envio a partir do Render. Se chegou, o envio na nuvem funciona.")
-                srv.send_message(m)
-                info["envio_teste"] = "ENVIADO"
     except Exception as e:
         info["login"] = f"FALHOU: {type(e).__name__}: {e}"
     return info
