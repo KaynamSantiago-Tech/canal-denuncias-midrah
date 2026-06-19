@@ -18,7 +18,7 @@ Depois abra no navegador:  http://localhost:8000
 ================================================================
 """
 
-import os, json, ssl, smtplib, base64, threading, mimetypes, datetime, urllib.request
+import os, json, ssl, smtplib, base64, threading, mimetypes, datetime, urllib.request, re, unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from email.message import EmailMessage
 from email.utils import make_msgid
@@ -428,6 +428,22 @@ def esc(v):
     return (v.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
              .replace("\n", "<br>"))
 
+def limpar_nome(nome, mime=""):
+    """Nome de arquivo seguro: sem acentos/emojis/caracteres inválidos, com extensão."""
+    nome = unicodedata.normalize("NFKD", str(nome or "")).encode("ascii", "ignore").decode("ascii")
+    nome = re.sub(r"[^A-Za-z0-9 ._()\-]+", "", nome).strip(" .") or "anexo"
+    if "." not in nome:                       # garante extensão a partir do MIME
+        ext = mimetypes.guess_extension((mime or "").split(";")[0].strip()) or ""
+        nome += ext
+    return nome[:120]
+
+def mime_de(nome, tipo=""):
+    """Tipo MIME confiável: usa o informado ou deduz da extensão do arquivo."""
+    tipo = (tipo or "").split(";")[0].strip()
+    if not tipo or tipo == "application/octet-stream":
+        tipo = mimetypes.guess_type(nome)[0] or "application/octet-stream"
+    return tipo
+
 def data_br(iso):
     try:
         return datetime.datetime.strptime(iso, "%Y-%m-%d").strftime("%d/%m/%Y")
@@ -540,10 +556,11 @@ def montar_email(d, protocolo, registrado_em, anexos):
     except Exception:
         pass
     for a in anexos:
-        ctype = a.get("tipo") or mimetypes.guess_type(a["nome"])[0] or "application/octet-stream"
+        ctype = mime_de(a["nome"], a.get("tipo"))
         maintype, _, subtype = ctype.partition("/")
         msg.add_attachment(a["bytes"], maintype=maintype or "application",
-                           subtype=subtype or "octet-stream", filename=a["nome"])
+                           subtype=subtype or "octet-stream",
+                           filename=limpar_nome(a["nome"], a.get("tipo")))
     return msg
 
 
@@ -568,7 +585,8 @@ def enviar_via_gas(d, protocolo, registrado_em, anexos):
         "text": texto,
         "logo_b64": LOGO_B64,
         "attachments": [
-            {"name": a["nome"], "mime": a.get("tipo") or "application/octet-stream",
+            {"name": limpar_nome(a["nome"], a.get("tipo")),
+             "mime": mime_de(a["nome"], a.get("tipo")),
              "b64": base64.b64encode(a["bytes"]).decode()}
             for a in anexos
         ],
